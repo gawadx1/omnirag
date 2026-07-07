@@ -1,0 +1,271 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum Provider {
+  OPENAI
+  ANTHROPIC
+  GEMINI
+  DEEPSEEK
+  OLLAMA
+}
+
+enum VectorDatabase {
+  QDRANT
+  PINECONE
+  CHROMA
+}
+
+enum ChunkingStrategy {
+  SEMANTIC
+  RECURSIVE
+  PARENT_CHILD
+  METADATA
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String?
+  email     String   @unique
+  emailVerified Boolean @default(false)
+  image     String?
+  password  String?
+  role      Role     @default(MEMBER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts   Account[]
+  sessions   Session[]
+  workspaces WorkspaceMember[]
+  documents  Document[]
+  queries    Query[]
+  settings   UserSetting?
+  auditLogs  AuditLog[]
+  conversations Conversation[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  accessToken       String?
+  refreshToken      String?
+  expiresAt         Int?
+  tokenType         String?
+  scope             String?
+  idToken           String?
+  sessionState      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique
+  expiresAt  DateTime
+  ipAddress  String?
+  userAgent  String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members WorkspaceMember[]
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        Role     @default(MEMBER)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model UserSetting {
+  id             String         @id @default(cuid())
+  userId         String         @unique
+  aiProvider     Provider       @default(OPENAI)
+  embeddingModel String         @default("text-embedding-3-small")
+  vectorDb       VectorDatabase @default(QDRANT)
+  chunkingStrategy ChunkingStrategy @default(RECURSIVE)
+  chunkSize      Int            @default(1000)
+  chunkOverlap   Int            @default(200)
+  temperature    Float          @default(0.7)
+  maxTokens      Int            @default(4096)
+  rerankEnabled  Boolean        @default(false)
+  rerankProvider String?
+  theme          String         @default("system")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ProviderCredential {
+  id        String   @id @default(cuid())
+  userId    String
+  provider  Provider
+  apiKey    String
+  baseUrl   String?
+  model     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, provider])
+}
+
+model Document {
+  id          String         @id @default(cuid())
+  userId      String
+  workspaceId String?
+  filename    String
+  originalName String
+  mimeType    String
+  size        Int
+  status      DocumentStatus @default(PENDING)
+  version     Int            @default(1)
+  metadata    Json?
+  error       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id])
+  chunks    Chunk[]
+  versions  DocumentVersion[]
+}
+
+model DocumentVersion {
+  id         String   @id @default(cuid())
+  documentId String
+  version    Int
+  filename   String
+  size       Int
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model Chunk {
+  id             String  @id @default(cuid())
+  documentId     String
+  content        String
+  index          Int
+  chunkSize      Int?
+  parentId       String?
+  metadata       Json?
+  embedding      Json?
+  embeddingModel String?
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  parent   Chunk?   @relation("ChunkParent", fields: [parentId], references: [id])
+  children Chunk[]  @relation("ChunkParent")
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String   @default("New Conversation")
+  messages  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Query {
+  id               String   @id @default(cuid())
+  userId           String
+  conversationId   String?
+  query            String
+  response         String?
+  latency          Int?
+  tokensUsed       Int?
+  cost             Float?
+  hallucinationScore Float?
+  confidenceScore  Float?
+  sources          Json?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model EvaluationResult {
+  id              String   @id @default(cuid())
+  queryId         String
+  faithfulness    Float?
+  answerRelevancy Float?
+  contextPrecision Float?
+  contextRecall   Float?
+  latency         Int?
+  cost            Float?
+  createdAt       DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String?
+  entityId  String?
+  metadata  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  key       String   @unique
+  lastUsed  DateTime?
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  userId    String
+  url       String
+  events    String[]
+  secret    String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
